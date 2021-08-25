@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- https://phpunit.de/manual/6.2/en/appendixes.configuration.html -->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/6.3/phpunit.xsd"
+         backupGlobals="false"
+         backupStaticAttributes="false"
+         colors="true"
+         convertErrorsToExceptions="true"
+         convertNoticesToExceptions="true"
+         convertWarningsToExceptions="true"
+         processIsolation="false"
+         stopOnFailure="false"
+         bootstrap="./bootstrap.php"
+>
+    <!-- test suites -->
+    <testsuite name="All Tests">
+        <directory>./tests</directory>
+    </testsuite>
+    <!-- filter for code coverage -->
+    <filter>
+        <whitelist>
+            <directory>./src</directory>
+        </whitelist>
+    </filter>
+    <!-- settings -->
+    <php>
+        <env name="TEST_MYSQL_HOST" value="localhost"/>
+        <env name="TEST_MYSQL_USERNAME" value="tester"/>
+        <env name="TEST_MYSQL_PASSWORD" value="secret"/>
+        <env name="TEST_MYSQL_PORT" value="3306"/>
+        <env name="TEST_MYSQL_TEMP_TABLE_SCHEMA" value="test"/>
+        <env name="TEST_CLICKHOUSE_HOST" value="localhost"/>
+        <env name="TEST_CLICKHOUSE_USERNAME" value="tester"/>
+        <env name="TEST_CLICKHOUSE_PASSWORD" value="secret"/>
+        <env name="TEST_CLICKHOUSE_PORT" value="8123"/>
+        <env name="TEST_CLICKHOUSE_PROTOCOL" value="http"/>
+    </php>
+</phpunit>

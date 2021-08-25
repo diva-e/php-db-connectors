@@ -1,0 +1,29 @@
+{
+  "name": "diva-e/php-db-connectors",
+  "description": "diva-e - DB abstraction layer",
+  "type": "library",
+  "homepage": "https://www.diva-e.com",
+  "license": "Apache-2.0",
+  "minimum-stability": "stable",
+  "prefer-stable": true,
+  "require": {
+    "php": ">=7.4.0",
+    "monolog/monolog": "*",
+    "ext-json": "*",
+    "ext-mysqli": "*",
+    "ext-mbstring": "*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^9.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "Divae\\DbConnectors\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Divae\\DbConnectors\\Test\\": "tests/"
+    }
+  }
+}
