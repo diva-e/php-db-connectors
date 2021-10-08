@@ -68,7 +68,7 @@ will get your own schema so that you can work with your own custom dataset.
 To enable the Testing TableHandler for a database connection, use the following:
 
 ```php
-\Divae\DbConnectors\Testing\TableHandler::createSchema($DBConnection);
+\Divae\DbConnectors\Testing\TableHandler::initTestSchema($DBConnection);
 ```
 
 Now you have to name every table that will be controlled by the Testing TableHandler:
@@ -87,6 +87,18 @@ If there are views queried that need to be based on your test data, add them:
 Since the Testing TableHandler is always enabled, just pass the query to the database classes and then
 TableHandler will rewrite all statements to use your temporary testing schema. After the test is done,
 Testing TableHandler cleans up for you.
+
+If you want to support multiple connection for one type of database, you can use the initialization like this:
+
+To enable the Testing TableHandler for a database connection, use the following:
+
+```php
+\Divae\DbConnectors\Testing\TableHandler::initTestSchema($DBConnection1, null, ['schema1', 'schema2']);
+\Divae\DbConnectors\Testing\TableHandler::initTestSchema($DBConnection2, null, ['schema3']);
+```
+
+This allows to have tables replaced within the `$DBConnection1` using the schemas `schema1` and `schema2`.
+If `schema3` is part of query, tables are replaced for `$DBConnection2`.
 
 ## TempTableHandler
 

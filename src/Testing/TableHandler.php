@@ -6,8 +6,11 @@ namespace Divae\DbConnectors\Testing;
 use Divae\DbConnectors\DatabaseConnector;
 use Divae\DbConnectors\DatabaseException;
 use Exception;
+use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Divae\DbConnectors\ClickHouse;
+use Divae\DbConnectors\MySQL;
+use Throwable;
 
 /**
  * tables used for testing are created within a test schema. This class is responsible to create the schema and the test
@@ -44,8 +47,9 @@ class TableHandler
     protected static array $testSchemas = [];
 
     /**
-     * List of database connectors to clean up afterwards
-     * @var DatabaseConnector[]
+     * Map of connector class name to connector/ruleset.
+     * @see getConnector
+     * @var array
      */
     protected static array $connectors = [];
 
@@ -66,31 +70,172 @@ class TableHandler
     }
 
     /**
+     * register connectors for the tests
+     * temp schemas are created as soon as a test table is added
+     *
+     * @param string $className the DBAccess class, which is supposed to be used
+     * @param DatabaseConnector $connector
+     * @param array|null $schemata
+     */
+    protected static function addConnector(string $className, DatabaseConnector $connector, ?array $schemata): void
+    {
+
+        // Process rules
+        if ($schemata !== null) {
+            // Lowercase all the schemas for easier comparison
+            $schemata = array_map('strtolower', $schemata);
+        }
+        $entry = [
+            'connector'         => $connector,
+            'rules'             => $schemata,
+            'testschemaCreated' => false,
+        ];
+
+        // Then add everything to the $connectors Array
+        static::$connectors[$className][] = $entry;
+    }
+
+    /**
+     * Returns a connector of the given class and that serves the selected schema
+     * @param string $className
+     * @param string $schema
+     * @return DatabaseConnector
+     */
+    protected static function getConnector(string $className, string $schema): DatabaseConnector
+    {
+        if (array_key_exists($className, static::$connectors)) {
+            $lcSchema = strtolower($schema);
+            $defaultConnector = null;
+
+            foreach (static::$connectors[$className] as $connectorRules) {
+                if ($connectorRules['rules'] === null) {
+                    $defaultConnector = $connectorRules['connector'];
+                } else {
+                    // Rules is an array
+                    if (in_array($lcSchema, $connectorRules['rules'])) {
+                        // We found the specific connector for this schema -> return it.
+                        return $connectorRules['connector'];
+                    }
+                }
+            }
+
+            // Since we are here, there is no specific connector.
+            if ($defaultConnector !== null) {
+                return $defaultConnector;
+            }
+
+            throw new InvalidArgumentException('No default connector for this class found');
+        } else {
+            throw new InvalidArgumentException('No connector for this class found');
+        }
+    }
+
+    /**
+     * checks, if the test schema already exists and creates it, if necessary
+     *
+     * @param string $className
+     * @param string $schema
+     *
+     * @throws InvalidArgumentException|DatabaseException
+     */
+    public static function ensureTestSchemaExists(string $className, string $schema): void
+    {
+        if (array_key_exists($className, static::$connectors)) {
+            $lcSchema = strtolower($schema);
+            $selectedConnectorRules = null;
+
+            foreach (static::$connectors[$className] as &$connectorRules) {
+                if ($connectorRules['rules'] === null) {
+                    $selectedConnectorRules = &$connectorRules;
+                } else {
+                    // Rules is an array
+                    if (in_array($lcSchema, $connectorRules['rules'])) {
+                        // We found the specific connector for this schema -> use it.
+                        $selectedConnectorRules = &$connectorRules;
+                        break;
+                    }
+                }
+            }
+
+            if ($selectedConnectorRules === null) {
+                // There was neither a specific connector nor a default one
+                throw new InvalidArgumentException('Neither default nor specific connector for this class found');
+            }
+
+            if (!$selectedConnectorRules['testschemaCreated']) {
+                /** @var DatabaseConnector $connector */
+                $connector = $selectedConnectorRules['connector'];
+                $connector->exec('CREATE DATABASE IF NOT EXISTS ' . static::getTestSchema($className));
+
+                $selectedConnectorRules['testschemaCreated'] = true;
+            }
+        } else {
+            throw new InvalidArgumentException('No connector for this class found');
+        }
+    }
+
+    protected static function removeConnectors(string $connectorClassName): void
+    {
+        foreach (static::$connectors[$connectorClassName] as $connector) {
+            try {
+                $connector['connector']->close();
+            } catch (Throwable $exception) {
+                if (self::$logger !== null) {
+                    self::$logger->warning("Cannot close a connector. Error:" . $exception->getMessage(),
+                        [$exception]);
+                }
+            }
+
+        }
+
+        unset(static::$connectors[$connectorClassName]);
+    }
+
+    protected static function execOnAllConnectors(string $className, string $query): void
+    {
+        foreach (static::$connectors[$className] as $connector) {
+            try {
+                $connector['connector']->exec($query);
+            } catch (Throwable $exception) {
+                if (self::$logger !== null) {
+                    self::$logger->warning('Cannot execute on a connector:\n' . $query . '\nError:\n' . $exception->getMessage(),
+                        [$exception]);
+                }
+            }
+        }
+    }
+
+    /**
      * Stores connector and related test schema name.
-     * If no test schema was provided, a random name is generated and the schema is created and dropped at the end.
+     * If no test schema was provided, a random name is generated and the schema is registered for lazy creation. After
+     * the test has concluded it will be dropped.
      *
      * @param DatabaseConnector $connector
-     * @param null|string $testSchema
+     * @param null|string $connectorClassName
+     * @param null|array $schemata
      *
-     * @throws DatabaseException
+     * @throws InvalidArgumentException
      */
-    public static function initTestSchema(DatabaseConnector $connector, ?string $testSchema = null): void
-    {
-        $connectorClassName = get_class($connector);
-        static::$connectors[$connectorClassName] = $connector;
+    public static function initTestSchema(
+        DatabaseConnector $connector,
+        ?string $connectorClassName = null,
+        ?array $schemata = null
+    ) {
+        if (is_null($connectorClassName)) {
+            $connectorClassName = get_class($connector);
+        }
+
+        static::addConnector($connectorClassName, $connector, $schemata);
 
         if (!array_key_exists($connectorClassName, static::$testSchemas)) {
-            if (!$testSchema) {
-                $testSchema = uniqid('test_' . date('ymdHis_'));
-                static::$autoCleanup = true;
-                static::createSchema($connectorClassName, $testSchema);
-                register_shutdown_function(function ($connectorClassName, $testSchema) {
-                    if (static::$autoCleanup) {
-                        static::dropSchema($connectorClassName, $testSchema);
-                    }
-                    static::$autoCleanup = false;
-                }, $connectorClassName, $testSchema);
-            }
+            $testSchema = uniqid('test_' . date('ymdHis_'));
+            static::$autoCleanup = true;
+            register_shutdown_function(function ($connectorClassName, $testSchema) {
+                if (static::$autoCleanup) {
+                    static::dropSchema($connectorClassName, $testSchema);
+                }
+                static::$autoCleanup = false;
+            }, $connectorClassName, $testSchema);
             static::$testSchemas[$connectorClassName] = $testSchema;
         }
     }
@@ -154,6 +299,8 @@ class TableHandler
      * @param string $connectorClassName
      * @param string $schema
      * @param string $table
+     *
+     * @throws InvalidArgumentException|DatabaseException
      */
     public static function addTable(string $connectorClassName, string $schema, string $table): void
     {
@@ -168,15 +315,22 @@ class TableHandler
         if (!in_array($table, static::$tablesBySchema[$schema])) {
             static::$allTables[] = $schema . '.' . $table;
             static::$tablesBySchema[$schema][] = $table;
-            if (array_key_exists($connectorClassName, static::$connectors) && array_key_exists($connectorClassName,
-                    static::$testSchemas)) {
+            if (
+                array_key_exists($connectorClassName, static::$connectors) &&
+                array_key_exists($connectorClassName, static::$testSchemas)) {
+                static::ensureTestSchemaExists($connectorClassName, $schema);
+
                 $oldTestMode = static::$testMode;
                 static::disable();
-                static::$connectors[$connectorClassName]->cloneTableStructure('`' . $schema . '`.`' . $table . '`',
+                $connector = static::getConnector($connectorClassName, $schema);
+                $connector->cloneTableStructure('`' . $schema . '`.`' . $table . '`',
                     '`' . static::$testSchemas[$connectorClassName] . '`.`' . self::getTestTableName($schema,
                         $table) . '`');
                 static::$testMode = $oldTestMode;
+            } else {
+                throw new InvalidArgumentException('Connector Class unknown or not initialized');
             }
+
         }
     }
 
@@ -204,17 +358,19 @@ class TableHandler
             static::$tablesBySchema[$schema][] = $table;
             if (array_key_exists($connectorClassName, static::$connectors) &&
                 array_key_exists($connectorClassName, static::$testSchemas)) {
+                static::ensureTestSchemaExists($connectorClassName, $schema);
 
                 $oldTestMode = static::$testMode;
                 static::disable();
 
-                $showCreateResult = static::$connectors[$connectorClassName]->query("SHOW CREATE VIEW `{$schema}`.`{$table}`");
+                $connector = static::getConnector($connectorClassName, $schema);
+                $showCreateResult = $connector->query("SHOW CREATE VIEW `{$schema}`.`{$table}`");
                 $showCreate = $showCreateResult->fetch_assoc();
 
                 static::enable();
 
                 if (array_key_exists('Create View', $showCreate)) {
-                    static::$connectors[$connectorClassName]->exec($showCreate['Create View']);
+                    $connector->exec($showCreate['Create View']);
                 }
 
                 static::$testMode = $oldTestMode;
@@ -233,30 +389,20 @@ class TableHandler
     }
 
     /**
-     * Creates a test schema
-     * @param string $connectorClassName
-     * @param string $schema
-     *
-     * @throws DatabaseException
-     */
-    public static function createSchema(string $connectorClassName, string $schema): void
-    {
-        if (array_key_exists($connectorClassName, static::$connectors)) {
-            static::$connectors[$connectorClassName]->exec("CREATE DATABASE IF NOT EXISTS {$schema}");
-        }
-    }
-
-    /**
      * Deletes a schema
      * @param string $connectorClassName
      * @param string $schema
-     *
-     * @throws DatabaseException
      */
     public static function dropSchema(string $connectorClassName, string $schema): void
     {
         if (array_key_exists($connectorClassName, static::$connectors)) {
-            static::$connectors[$connectorClassName]->exec("DROP DATABASE IF EXISTS {$schema}");
+            $connectorList = static::$connectors[$connectorClassName];
+            foreach ($connectorList as &$connector) {
+                if ($connector['testschemaCreated']) {
+                    $connector['connector']->exec("DROP DATABASE IF EXISTS {$schema}");
+                    $connector['testschemaCreated'] = false;
+                }
+            }
         }
     }
 
@@ -264,8 +410,6 @@ class TableHandler
      * drop all test tables
      *
      * @param string $connectorClassName
-     *
-     * @throws DatabaseException
      */
     public static function cleanUp(string $connectorClassName): void
     {
@@ -277,7 +421,7 @@ class TableHandler
                     $oldTestMode = static::$testMode;
                     static::disable();
                     $query = 'DROP TABLE IF EXISTS `' . static::$testSchemas[$connectorClassName] . '`.`' . $table . '`';
-                    static::$connectors[$connectorClassName]->exec($query);
+                    self::execOnAllConnectors($connectorClassName, $query);
                     static::$testMode = $oldTestMode;
                 }
             }
@@ -304,8 +448,7 @@ class TableHandler
                 }
                 unset(static::$testSchemas[$connectorClassName]);
 
-                static::$connectors[$connectorClassName]->close();
-                unset(static::$connectors[$connectorClassName]);
+                static::removeConnectors($connectorClassName);
             }
         }
 
@@ -354,16 +497,30 @@ class TableHandler
     protected static function addClickhouseRemoteReplacements(array &$replacements): void
     {
         // get Clickhouse test server settings
-        $credentials = static::$connectors[ClickHouse::class]->getCredentials();
+        if (!array_key_exists(MySQL::class,
+                static::$connectors) or !array_key_exists(Clickhouse::class, static::$connectors)) {
+            // Either MySQL or Clickhouse is not enabled -> no replacements
+            return;
+        }
 
         foreach (static::$tablesBySchema as $schema => $tables) {
+            $mysqlCredentials = static::getConnector(MySQL::class, $schema)->getCredentials();
+            $credentials = static::getConnector(Clickhouse::class, $schema)->getCredentials();
+
             foreach ($tables as $table) {
                 $tableIndex = array_search($schema . '.' . $table, static::$allTables);
 
+                // Clickhouse -> Clickhouse connection
                 // replace host, schema and table names with the test names
                 $pattern = "/remote\\(\\s*'[^']*'\\s*,\\s*'" . preg_quote($schema,
                         '/') . "'\\s*,\\s*'" . preg_quote($table, '/') . "'\\s*/ims";
                 $replacements[$pattern] = "remote('" . $credentials['host'] . "','" . static::$testSchemas[Clickhouse::class] . "','" . substr($table,
+                        0, 55) . '_' . $tableIndex . "'";
+
+                // Clickhouse -> MySQL connection
+                $pattern = '/mysql\\(\\s*\'[^\']+\'\\s*,\\s*\'' . preg_quote($schema,
+                        '/') . '\'\\s*,\\s*\'' . preg_quote($table, '/') . '\'\\s*/ims';
+                $replacements[$pattern] = 'mysql(\'' . $mysqlCredentials['host'] . '\', \'' . (static::$testSchemas[MySQL::class] ?? '') . '\', \'' . substr($table,
                         0, 55) . '_' . $tableIndex . "'";
             }
         }
