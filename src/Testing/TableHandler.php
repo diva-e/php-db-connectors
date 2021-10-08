@@ -19,6 +19,18 @@ use Throwable;
 class TableHandler
 {
     /**
+     * your can change this value, if you have extended the original classes
+     * @var string
+     */
+    public static string $clickHouseClassName = ClickHouse::class;
+
+    /**
+     * your can change this value, if you have extended the original classes
+     * @var string
+     */
+    public static string $mySqlClassName = MySQL::class;
+
+    /**
      * @var bool
      */
     protected static bool $testMode = true;
@@ -264,7 +276,7 @@ class TableHandler
                 }
 
                 // add replacements for ClickHouse cross server usage
-                if ($connectorClassName == ClickHouse::class) {
+                if ($connectorClassName == static::$clickHouseClassName) {
                     static::addClickhouseRemoteReplacements($replacements);
                 }
             }
@@ -497,15 +509,15 @@ class TableHandler
     protected static function addClickhouseRemoteReplacements(array &$replacements): void
     {
         // get Clickhouse test server settings
-        if (!array_key_exists(MySQL::class,
-                static::$connectors) or !array_key_exists(Clickhouse::class, static::$connectors)) {
+        if (!array_key_exists(static::$mySqlClassName,
+                static::$connectors) or !array_key_exists(static::$clickHouseClassName, static::$connectors)) {
             // Either MySQL or Clickhouse is not enabled -> no replacements
             return;
         }
 
         foreach (static::$tablesBySchema as $schema => $tables) {
-            $mysqlCredentials = static::getConnector(MySQL::class, $schema)->getCredentials();
-            $credentials = static::getConnector(Clickhouse::class, $schema)->getCredentials();
+            $mysqlCredentials = static::getConnector(static::$mySqlClassName, $schema)->getCredentials();
+            $credentials = static::getConnector(static::$clickHouseClassName, $schema)->getCredentials();
 
             foreach ($tables as $table) {
                 $tableIndex = array_search($schema . '.' . $table, static::$allTables);
@@ -514,13 +526,13 @@ class TableHandler
                 // replace host, schema and table names with the test names
                 $pattern = "/remote\\(\\s*'[^']*'\\s*,\\s*'" . preg_quote($schema,
                         '/') . "'\\s*,\\s*'" . preg_quote($table, '/') . "'\\s*/ims";
-                $replacements[$pattern] = "remote('" . $credentials['host'] . "','" . static::$testSchemas[Clickhouse::class] . "','" . substr($table,
+                $replacements[$pattern] = "remote('" . $credentials['host'] . "','" . static::$testSchemas[static::$clickHouseClassName] . "','" . substr($table,
                         0, 55) . '_' . $tableIndex . "'";
 
                 // Clickhouse -> MySQL connection
                 $pattern = '/mysql\\(\\s*\'[^\']+\'\\s*,\\s*\'' . preg_quote($schema,
                         '/') . '\'\\s*,\\s*\'' . preg_quote($table, '/') . '\'\\s*/ims';
-                $replacements[$pattern] = 'mysql(\'' . $mysqlCredentials['host'] . '\', \'' . (static::$testSchemas[MySQL::class] ?? '') . '\', \'' . substr($table,
+                $replacements[$pattern] = 'mysql(\'' . $mysqlCredentials['host'] . '\', \'' . (static::$testSchemas[static::$mySqlClassName] ?? '') . '\', \'' . substr($table,
                         0, 55) . '_' . $tableIndex . "'";
             }
         }
