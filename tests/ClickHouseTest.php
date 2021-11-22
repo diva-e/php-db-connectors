@@ -37,6 +37,24 @@ class ClickHouseTest extends TestCase
     /**
      * @throws DatabaseException
      */
+    public function testConnectionException()
+    {
+        $CLH = $this->getClickHouseConnection();
+
+        // make credentials invalid to force a connection issue
+        $clickhouseCredentials = $CLH->getCredentials();
+        $clickhouseCredentials[AbstractConnector::CREDENTIALS_HOSTNAME] = '127.0.0.2';
+        $CLH->setCredentials($clickhouseCredentials);
+
+        $this->expectException(DatabaseException::class);
+
+        // suppress warnings
+        @$CLH->query("SELECT 1");
+    }
+
+    /**
+     * @throws DatabaseException
+     */
     public function testCanQuery()
     {
         $CLH = $this->getClickHouseConnection();

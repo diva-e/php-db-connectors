@@ -381,7 +381,7 @@ class ClickHouse extends AbstractConnector implements DatabaseSchemaAware
         $url = "{$protocol}://{$hostname}:{$port}/?" . http_build_query($httpQueryValues);
         $raw_result = file_get_contents($url, false, $context);
         if (
-            !isset($http_response_header) ||
+            !isset($http_response_header[0]) ||
             !preg_match('~^HTTP/\d\.\d 200 ~i', $http_response_header[0])
         ) {
             $errorMsg = $raw_result !== false
