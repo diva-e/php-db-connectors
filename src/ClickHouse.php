@@ -191,7 +191,7 @@ class ClickHouse extends AbstractConnector implements DatabaseSchemaAware
                 . " --host={$hostname} --port {$port}"
                 . ($this->credentials[self::CREDENTIALS_USERNAME] ? ' --user ' . escapeshellcmd($this->credentials[self::CREDENTIALS_USERNAME]) : '')
                 . ($this->credentials[self::CREDENTIALS_PASSWORD] ? ' --password ' . escapeshellcmd($this->credentials[self::CREDENTIALS_PASSWORD]) : '')
-                . ' --max_threads=' . $this->maxThreadsClient . ' --receive_timeout 3600 --send_timeout 3600'
+                . ' --max_threads=' . $this->maxThreadsClient . ' --receive_timeout 3600 --send_timeout 3600 '
                 . ($options ?? '') . ' --query=' . escapeshellarg($statement) . '';
 
             if ($inputFile) {
@@ -209,9 +209,9 @@ class ClickHouse extends AbstractConnector implements DatabaseSchemaAware
             exec($_exec, $output, $exitCode);
 
             if ($exitCode != 0) {
-                $message = $output[0];
+                $message = $output[0] ?? '';
                 // No data is no real error in our case!
-                if (strpos($message, 'No data to insert')) {
+                if (strpos((string)$message, 'No data to insert')) {
                     $this->logger->debug("No Data to insert");
                     $exitCode = 0;
                 } else {
