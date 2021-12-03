@@ -172,10 +172,12 @@ class ClickHouse extends AbstractConnector implements DatabaseSchemaAware
      * @param string $statement
      * @param null|string $inputFile
      * @param string|null $cmdPrefix
+     * @param null|string $options
+     * @param null|string $cmdSuffix
      *
      * @return int
      */
-    public function exec_client(string $statement, ?string $inputFile = null, string $cmdPrefix = null): int
+    public function exec_client(string $statement, ?string $inputFile = null, string $cmdPrefix = null, ?string $options = null, ?string $cmdSuffix = null): int
     {
         $exitCode = 0;
         if ($statement) {
@@ -190,7 +192,7 @@ class ClickHouse extends AbstractConnector implements DatabaseSchemaAware
                 . ($this->credentials[self::CREDENTIALS_USERNAME] ? ' --user ' . escapeshellcmd($this->credentials[self::CREDENTIALS_USERNAME]) : '')
                 . ($this->credentials[self::CREDENTIALS_PASSWORD] ? ' --password ' . escapeshellcmd($this->credentials[self::CREDENTIALS_PASSWORD]) : '')
                 . ' --max_threads=' . $this->maxThreadsClient . ' --receive_timeout 3600 --send_timeout 3600'
-                . ' --query=' . escapeshellarg($statement) . '';
+                . ($options ?? '') . ' --query=' . escapeshellarg($statement) . '';
 
             if ($inputFile) {
                 $_exec .= " < {$inputFile}";
@@ -200,9 +202,11 @@ class ClickHouse extends AbstractConnector implements DatabaseSchemaAware
                 $_exec = $cmdPrefix . " " . $_exec;
             }
 
+            $_exec .= ($cmdSuffix ?? ' 2>&1 ');
+
             $output = [];
 
-            exec($_exec . ' 2>&1 ', $output, $exitCode);
+            exec($_exec, $output, $exitCode);
 
             if ($exitCode != 0) {
                 $message = $output[0];
